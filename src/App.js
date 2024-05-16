@@ -3,101 +3,90 @@ import './index.css';
 import Controls from './components/Controls';
 import LengthControl from './components/LengthControl';
 import Clock from './components/Clock';
+import beepSound from './beep.mp3';
+
+const BREAK_LENGTH = 5 * 60;
+const SESSION_LENGTH = 25 * 60;
+const MIN = 60;
+const MAX = 60 * 60;
+const INTERVAL = 60;
 
 const App = () => {
-    const [breakLength, setBreakLength] = useState(5);
-    const [sessionLength, setSessionLength] = useState(25);
-    const [timeLeft, setTimeLeft] = useState(25 * 60);
-    const [isRunning, setIsRunning] = useState(false);
-    const [isSession, setIsSession] = useState(true);
-    const [timerLabel, setTimerLabel] = useState("Session");
+    const [breakLength, setBreakLength] = useState(BREAK_LENGTH);
+    const [sessionLength, setSessionLength] = useState(SESSION_LENGTH);
+    const [displayState, setDisplayState] = useState({
+        time: SESSION_LENGTH,
+        timeType: "Session",
+        timerRunning: false,
+    });
 
     const beepAudio = useRef(null);
-    const intervalRef = useRef(null);
 
     useEffect(() => {
-        setTimeLeft(sessionLength * 60);
-    }, [sessionLength]);
-
-    useEffect(() => {
-        if (timeLeft === 0) {
-            try {
-                beepAudio.current.play();
-                if (isSession) {
-                    setTimerLabel("Break");
-                    setTimeLeft(breakLength * 60);
-                } else {
-                    setTimerLabel("Session");
-                    setTimeLeft(sessionLength * 60);
-                }
-                setIsSession(!isSession);
-            } catch (error) {
-                console.error("Error transitioning timer:", error);
-            }
-        }
-    }, [timeLeft, isSession, breakLength, sessionLength]);
-
-    useEffect(() => {
-        if (isRunning) {
-            intervalRef.current = setInterval(() => {
-                setTimeLeft(prevTime => prevTime - 1);
+        let timerID;
+        if (displayState.timerRunning) {
+            timerID = setInterval(() => {
+                setDisplayState(prev => {
+                    if (prev.time === 0) {
+                        playBeep();
+                        return {
+                            ...prev,
+                            time: prev.timeType === 'Session' ? breakLength : sessionLength,
+                            timeType: prev.timeType === 'Session' ? 'Break' : 'Session',
+                        };
+                    }
+                    return { ...prev, time: prev.time - 1 };
+                });
             }, 1000);
-        } else if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
         }
-        return () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-                intervalRef.current = null;
-            }
-        };
-    }, [isRunning]);
+        return () => clearInterval(timerID);
+    }, [displayState.timerRunning, breakLength, sessionLength]);
 
-    const handleIncrement = (type) => {
-        if (type === 'break') {
-            if (breakLength < 60) {
-                setBreakLength(prev => prev + 1);
-            }
-        } else {
-            if (sessionLength < 60) {
-                setSessionLength(prev => prev + 1);
-            }
-        }
+    const changeBreakTime = (time) => {
+        if (displayState.timerRunning) return;
+        setBreakLength(time);
     };
 
-    const handleDecrement = (type) => {
-        if (type === 'break') {
-            if (breakLength > 1) {
-                setBreakLength(prev => prev - 1);
-            }
-        } else {
-            if (sessionLength > 1) {
-                setSessionLength(prev => prev - 1);
-            }
-        }
+    const changeSessionTime = (time) => {
+        if (displayState.timerRunning) return;
+        setSessionLength(time);
+        setDisplayState(prev => ({
+            ...prev,
+            time: time,
+            timeType: "Session",
+            timerRunning: false,
+        }));
     };
 
-    const handleStartStop = () => {
-        setIsRunning(!isRunning);
+    const reset = () => {
+        setBreakLength(BREAK_LENGTH);
+        setSessionLength(SESSION_LENGTH);
+        setDisplayState({
+            time: SESSION_LENGTH,
+            timeType: "Session",
+            timerRunning: false,
+        });
+        const audio = beepAudio.current;
+        audio.pause();
+        audio.currentTime = 0;
     };
 
-    const handleReset = () => {
-        console.log('Resetting...');
-        setIsRunning(false);
-        setBreakLength(5);
-        setSessionLength(25);
-        setTimeLeft(25 * 60);
-        setIsSession(true);
-        setTimerLabel("Session");
-        const beep = beepAudio.current;
-        beep.pause();
-        beep.currentTime = 0;
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-        }
-        console.log('Reset complete.');
+    const startStop = () => {
+        setDisplayState(prev => ({
+            ...prev,
+            timerRunning: !prev.timerRunning,
+        }));
+    };
+
+    const playBeep = () => {
+        const audio = beepAudio.current;
+        audio.currentTime = 0;
+        audio.play();
+        setTimeout(() => {
+            if (!audio.paused) {
+                audio.play();
+            }
+        }, 500);
     };
 
     return (
@@ -107,28 +96,28 @@ const App = () => {
                 <LengthControl 
                     id="break" 
                     title="Break Length" 
-                    length={breakLength} 
-                    increment={() => handleIncrement('break')} 
-                    decrement={() => handleDecrement('break')} 
+                    length={breakLength / 60} 
+                    increment={() => changeBreakTime(Math.min(breakLength + INTERVAL, MAX))} 
+                    decrement={() => changeBreakTime(Math.max(breakLength - INTERVAL, MIN))} 
                 />
                 <LengthControl 
                     id="session" 
                     title="Session Length" 
-                    length={sessionLength} 
-                    increment={() => handleIncrement('session')} 
-                    decrement={() => handleDecrement('session')} 
+                    length={sessionLength / 60} 
+                    increment={() => changeSessionTime(Math.min(sessionLength + INTERVAL, MAX))} 
+                    decrement={() => changeSessionTime(Math.max(sessionLength - INTERVAL, MIN))} 
                 />
             </div>
             <Clock 
-                label={timerLabel} 
-                timeLeft={timeLeft} 
+                label={displayState.timeType} 
+                timeLeft={displayState.time} 
             />
             <Controls 
-                startStop={handleStartStop} 
-                reset={handleReset} 
-                isRunning={isRunning} 
+                startStop={startStop} 
+                reset={reset} 
+                isRunning={displayState.timerRunning} 
             />
-            <audio id="beep" ref={beepAudio} src="https://www.soundjay.com/button/beep-07.wav" />
+            <audio id="beep" ref={beepAudio} src={beepSound} />
         </div>
     );
 };
